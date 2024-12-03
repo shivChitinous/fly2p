@@ -126,7 +126,7 @@ def loadImagingTimeseries(path2imgdat):
     return imgTS
 
 ## CONVERT TO XARRAY
-def stack2xarray(stack, basicMetadat, data4D = True):
+def stack2xarray(stack, basicMetadat, data4D = True, clipping = False):
     volcoords = [i/basicMetadat['scanVolumeRate'] for i in range(stack.shape[0])]
     if data4D:
         slices = [i*basicMetadat['stackZStepSize'] for i in range(stack.shape[1])]
@@ -141,8 +141,11 @@ def stack2xarray(stack, basicMetadat, data4D = True):
         imgStack = xr.DataArray(stack, coords = [volcoords, xpx, ypx],
                             dims = ['volumes [s]', 'xpix [µm]', 'ypix [µm]'])
 
-    minval = np.min(imgStack)
-    if minval < 0: imgStack = imgStack - minval
+    if clipping==False: 
+        minval = np.min(imgStack)
+        if minval < 0: imgStack = imgStack - minval
+    elif clipping==True:
+        imgStack = np.clip(imgStack, 0, None)
 
     return imgStack
 
@@ -221,7 +224,7 @@ def computeDFF(stack,
             paletteB = plt.cm.Greys(np.linspace(0, 1, stack["planes [µm]"].size))
 
         for p in range(stack["planes [µm]"].size):
-            filtStack = gaussian_filter(stack[{'planes [µm]': p}].squeeze(), sigma=[0,2,2])
+            filtStack = gaussian_filter(stack[{'planes [µm]': p}].squeeze(), sigma=gaussian_sigma)
             
             #background subtraction
             if subtract:
@@ -259,25 +262,49 @@ def computeDFF(stack,
 
 ### functions for background subtraction
 # Background is manually drawn
-def roi_subtract(stack, background_mask, order = 3,window = 7):
-    T = stack.shape[0]
+def roi_subtract(stack, background_mask, order=3, window=7, savgolFiltBack=True):
+    """
+    Perform background subtraction on a 3D or 4D stack of images with vectorized operations.
 
-    #get mean value of fluorescence inside the background region
-    back_F = [np.nanmean(np.where(background_mask, stack[t,:,:],
-                                  float('nan'))) for t in range(T)]
-    back_F = savgol_filter(np.asarray(back_F).astype('float'), window, order)
-    #assumption: background is homogeneous
-    #the best estimate of background fluorescence in the image is the mean of the fluorescence
-    #in the background region
+    Parameters:
+        stack (numpy.ndarray): 3D or 4D array ((T x H x W) or (T x N x H x W)) representing the image stack.
+        background_mask (numpy.ndarray): 2D or 3D boolean array ((H x W) or (T x H x W)) defining the background region.
+        order (int): Polynomial order for Savitzky-Golay filter.
+        window (int): Window size for Savitzky-Golay filter.
+        savgolFiltBack (bool): Whether to apply Savitzky-Golay filtering to the background signal.
 
-    #subtract
-    filt = np.array([stack[t,:,:]-back_F[t] for t in range(T)])
+    Returns:
+        numpy.ndarray: The background-subtracted and normalized image stack.
+    """
+    # Determine the dimensionality of the input
+    if stack.ndim == 3:
+        # 3D case: T x H x W
+        back_F = np.nanmean(np.where(background_mask, stack, np.nan), axis=(1, 2))
+    elif stack.ndim == 4:
+        # 4D case: T x N x H x W
+        back_F = np.nanmean(np.where(background_mask, stack, np.nan), axis=(2, 3))
+    else:
+        raise ValueError("Stack must be either 3D (T x H x W) or 4D (T x N x H x W).")
 
-    #range should be same as before subtraction and convert to integer values
-    filt = np.round(((filt-filt.min())/
-                     (filt.max()-filt.min())*(stack.max()-stack.min()))+stack.min())
+    # Apply Savitzky-Golay filtering if required
+    if savgolFiltBack:
+        back_F = savgol_filter(back_F.astype('float'), window, order, axis=0)
 
-    return filt
+    # Subtract the background fluorescence from the stack
+    if stack.ndim == 3:
+        filt = stack - back_F[:, np.newaxis, np.newaxis]
+    elif stack.ndim == 4:
+        filt = stack - back_F[:, :, np.newaxis, np.newaxis]
+
+    # Normalize the range to match the original stack and convert to integers
+    filt_min = filt.min()
+    filt_max = filt.max()
+    stack_min = stack.min()
+    stack_max = stack.max()
+
+    filt = np.round((filt - filt_min) / (filt_max - filt_min) * (stack_max - stack_min) + stack_min)
+
+    return filt.astype(stack.dtype)
 
 def subtract_fig(fig, ax, stacks, colors=['r','b'], randomPoints = 1, ylims = [150, 250]):
 
@@ -304,7 +331,7 @@ def subtract_fig(fig, ax, stacks, colors=['r','b'], randomPoints = 1, ylims = [1
 
 ## MOTION CORRECTION ##
 
-def genReference(imgStack, numRefImg, v1, v2, maxProject=False, rippleFilt=False, plane=-1, center_frac=1/100, ref_as_fraction=True): 
+def genReference(imgStack, numRefImg, v1, v2, maxProject=False, rippleFilt=False, plane=-1, center_frac=1/100, ref_as_fraction=True, clipVal = None, background_mask=None): 
     # generate a 2D or 3D reference based on averages a subset of frames from the full time series and optional maxprojection
     
     if ref_as_fraction:
@@ -317,8 +344,10 @@ def genReference(imgStack, numRefImg, v1, v2, maxProject=False, rippleFilt=False
     if maxProject:
         stackMP = np.max(imgStack, axis=1) # max projection over volume
         reference = np.mean(stackMP[ t1 : t1+numRefImg,:,:],axis=0) + np.mean(stackMP[ t2 : t2+numRefImg,:,:],axis=0)
+        if clipVal is not None: reference = xr.where(reference<clipVal,0,reference) 
     else:
         reference = np.mean(imgStack[ t1 : t1+numRefImg,:,:,:],axis=0) + np.mean(imgStack[ t2 : t2+numRefImg,:,:,:],axis=0)
+        if clipVal is not None: reference = xr.where(reference<clipVal,0,reference)
         if rippleFilt:
             reference = notchFilter2d(reference, plane=plane, center_frac=center_frac)
 
