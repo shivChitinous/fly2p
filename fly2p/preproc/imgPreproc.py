@@ -186,15 +186,19 @@ def computeDFF(stack,
         #background subtraction
         if subtract:
             if background_mask is not None:
-                filtStack = xr.apply_ufunc(roi_subtract,filtStack,
+                filtStackSub = xr.apply_ufunc(roi_subtract,filtStack,
                                            kwargs={"background_mask":background_mask})
+                if showSubtractFig:
+                        fig, ax = plt.subplots(1,2,figsize = (10,1.5))
+                        fig, ax = subtract_fig(fig, ax, [filtStack, filtStackSub], colors=['red', 'black'], **showSubtractFigParams)
+                        fig.show()
             else:
                 print('please provide a background mask')
         
         if savgol:
-            filtF = savgol_filter(filtStack.astype('float'), window, order, axis=0)
+            filtF = savgol_filter(filtStackSub.astype('float'), window, order, axis=0)
         else:
-            filtF = filtStack.astype('float')
+            filtF = filtStackSub.astype('float')
 
         # Estimate baseline
         if baseline_lowest_mean:
@@ -233,6 +237,7 @@ def computeDFF(stack,
                                                kwargs={"background_mask":background_mask[p,:,:]})
                     if showSubtractFig:
                         fig, ax = subtract_fig(fig, ax, [filtStack, filtStackSub], colors=[paletteR[p], paletteB[p]], **showSubtractFigParams)
+                        fig.show()
                 else:
                     print('please provide a background mask')
             
