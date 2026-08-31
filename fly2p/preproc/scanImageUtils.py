@@ -1,6 +1,7 @@
 import json
 import numpy as np
 from skimage import io
+import warnings
 
 # Utility functions for working with ScanImage tiff files
 
@@ -53,9 +54,8 @@ def getSIbasicMetadata(metadat):
             if 'numFramesPerVolume' in line:
                 fpv = int(line.split('=')[-1].strip())
 
-
             if 'numVolumes' in line:
-                nVols = int(line.split('=')[-1].strip())
+                nVols = int(float(line.split('=')[-1].strip()))
 
             if 'hStackManager.stackZStepSize' in line:
                 stackZStepSize = float(line.split('=')[-1].strip())
@@ -99,6 +99,12 @@ def getSIMetadict(metadat):
 
 def loadvolume(path2tiff, basicMetadat, selectChan, channel = 'CaCh'):
     vol = io.imread(path2tiff)
+
+    if vol.shape[0] != basicMetadat['nVols']:
+        warnings.warn(
+            f"Actual #volumes not the same as the set #volumes in SI: metadata={basicMetadat['nVols']}, "
+            f"file={vol.shape[0]}. Using file value."
+        )
 
     #truncate in case aquisition was interrupted and the last volume was incomplete
     trunk = (vol.shape[0])%(basicMetadat['fpv'])

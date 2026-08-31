@@ -504,8 +504,8 @@ def computeMotionShift(stack, refImage, upsampleFactor, sigmaval = 2, doFilter =
         else:
             shiftFilt_x = shift[0,:].copy()
             shiftFilt_y = shift[1,:].copy()
-            shiftFilt_x[abs(shiftFilt_x) > stdFactor*np.std(shiftFilt_x)] = np.nan
-            shiftFilt_y[abs(shiftFilt_y) > stdFactor*np.std(shiftFilt_y)] = np.nan
+            shiftFilt_x[abs(shiftFilt_x - np.mean(shiftFilt_x)) > stdFactor*np.std(shiftFilt_x)] = np.nan
+            shiftFilt_y[abs(shiftFilt_y - np.mean(shiftFilt_y)) > stdFactor*np.std(shiftFilt_y)] = np.nan
 
             allT = np.arange(len(shiftFilt_x))
             shiftFilt_x_interp = np.interp(allT, allT[~np.isnan(shiftFilt_x)], shiftFilt_x[~np.isnan(shiftFilt_x)])
